@@ -1,20 +1,19 @@
+import 'dotenv/config';
+import * as crypto from 'crypto';
 import * as TwoCaptcha from '2captcha';
 import { ethers } from 'ethers';
 import { promises as fs } from 'fs';
-import * as crypto from 'crypto';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 
-const API_KEY =
-  process.env.APIKEY_2CAPTCHA || '0b4c850a1019b2ebac8ec150fdab0fec';
+const APIKEY_2CAPTCHA = process.env.APIKEY_2CAPTCHA || '';
+const SKY_IP_TOKEN = process.env.SKY_IP_TOKEN || '';
 const SITE_KEY = '0x4AAAAAAA-3X4Nd7hf3mNGx';
 const URL = 'https://testnet.monad.xyz/';
 const INTERVAL = 12 * 60 * 60 * 1000; // 12小时
-const SKY_IP_TOKEN = 'l3RcoISGoDwmONcF1741101016554'; // 只保留 token 值
+const TARGET_ADDRESS = '0xYourTargetAddressHere'; // 替换为你的目标归集地址
+const RPC_URL = 'https://testnet.monad.xyz/rpc'; // Monad Testnet RPC URL（根据实际情况替换）
 
-const solver = new TwoCaptcha.Solver(API_KEY);
-
-// 可选特征值
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
@@ -37,7 +36,9 @@ const TIMEZONES = [
 ];
 const LANGUAGES = ['zh-CN', 'en-US', 'en-GB', 'ja-JP'];
 
-function createProxyAgent(proxy: string | undefined) {
+const solver = new TwoCaptcha.Solver(APIKEY_2CAPTCHA);
+
+function createProxyAgent(proxy: string | null) {
   if (!proxy) return undefined;
 
   if (proxy.startsWith('http')) {
@@ -65,28 +66,45 @@ async function getDynamicProxy() {
       { method: 'GET' }
     );
     const proxyString = await response.text();
-    console.log(proxyString, '---res---');
-    // if (!proxyString || !proxyString.includes(':')) {
-    //   throw new Error('无效的代理格式');
-    // }
-    return proxyString.trim(); // 返回类似 "http://user:pass@1.2.3.4:8080"
-  } catch (e) {
+
+    if (!proxyString.match(/^\d+\.\d+\.\d+\.\d+:\d+$/)) {
+      if (proxyString.includes('未加入白名单')) {
+        throw new Error(`本地 IP 未加入 SKY-IP 白名单: ${proxyString}`);
+      }
+      throw new Error(`无效的代理格式: ${proxyString}`);
+    }
+    return `http://${proxyString}`;
+    return 'socks5://liu3:Q3TokPp46w@158.178.244.174:39466';
+  } catch (e: any) {
+    console.error('获取 Sky-IP 动态代理失败:', e.message);
     return null;
   }
 }
 
-function generateVisitorId(wallet: any, ipIndex: number): string {
+function generateVisitorId(wallet: any): string {
+  const screenResolution =
+    RESOLUTIONS[Math.floor(Math.random() * RESOLUTIONS.length)];
+  const timezone = TIMEZONES[Math.floor(Math.random() * TIMEZONES.length)];
+  const language = LANGUAGES[Math.floor(Math.random() * LANGUAGES.length)];
+  // const webglOptions = [
+  //   { vendor: 'Intel Inc.', renderer: 'Intel Iris OpenGL Engine' },
+  //   {
+  //     vendor: 'NVIDIA Corporation',
+  //     renderer: 'NVIDIA GeForce GTX 970 OpenGL Engine',
+  //   },
+  //   { vendor: 'AMD', renderer: 'AMD Radeon Pro 560 OpenGL Engine' },
+  // ];
+  // const webgl = webglOptions[Math.floor(Math.random() * webglOptions.length)];
+  // const canvasHash = crypto.randomBytes(16).toString('hex');
+
   const fingerprintData = {
     userAgent: wallet.userAgent,
-    screen: `${wallet.screenResolution}x${24}`,
-    plugins: 'PDF Viewer,Chrome PDF Viewer,Native Client',
-    timezone: wallet.timezone,
-    language: wallet.language,
-    webglVendor: wallet.webglVendor,
-    webglRenderer: wallet.webglRenderer,
-    canvasHash: wallet.canvasHash,
-    timestamp: Date.now(),
-    uniqueId: ipIndex,
+    language: language,
+    screenResolution: screenResolution,
+    screenDepth: 24,
+    timezone: timezone,
+    plugins: 'PDF Viewer,Chrome PDF Viewer,MetaMask',
+    platform: 'Windows',
   };
 
   return crypto
@@ -95,97 +113,79 @@ function generateVisitorId(wallet: any, ipIndex: number): string {
     .digest('hex');
 }
 
-async function claimTokens(wallet: any, ipIndex: number) {
+async function claimTokens(wallet: any) {
   const { default: fetch } = await import('node-fetch');
   try {
-    const proxyString = await getDynamicProxy();
-    if (!proxyString) throw new Error('无法获取动态代理');
-    console.log(proxyString, '---proxyString---');
-
-    // const proxyParts = proxyString.match(/http:\/\/(.+):(.+)@(.+):(\d+)/);
-    // if (!proxyParts) throw new Error(`代理格式解析失败: ${proxyString}`);
-
-    // const proxy = {
-    //   host: proxyParts[3],
-    //   port: parseInt(proxyParts[4]),
-    //   auth: {
-    //     username: proxyParts[1],
-    //     password: proxyParts[2],
-    //   },
-    // };
+    const proxyString = '';
 
     const captchaResult = await solver.turnstile(SITE_KEY, URL);
-    const visitorId = generateVisitorId(wallet, ipIndex);
+    const visitorId = generateVisitorId(wallet);
+
+    await fetch('https://api.ipify.org', {
+      agent: createProxyAgent(proxyString),
+    })
+      .then((res) => res.text())
+      .then((ip) => console.log('代理IP:', ip))
+      .catch((err) => console.error('获取代理IP失败:', err.message));
 
     const response = await fetch('https://testnet.monad.xyz/api/claim', {
       method: 'POST',
       headers: {
         accept: '*/*',
-        'accept-language': `${wallet.language},zh;q=0.9`,
+        'accept-language': 'zh-CN,zh;q=0.9',
         'cache-control': 'no-cache',
         'content-type': 'application/json',
         pragma: 'no-cache',
         priority: 'u=1, i',
-        'sec-ch-ua': wallet.userAgent.split(' ')[2] || '"Chromium";v="133"',
+        'sec-ch-ua':
+          '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
         'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': `"${
-          wallet.userAgent.includes('Macintosh')
-            ? 'macOS'
-            : wallet.userAgent.includes('Windows')
-            ? 'Windows'
-            : 'Linux'
-        }"`,
+        'sec-ch-ua-platform': 'Windows',
         'sec-fetch-dest': 'empty',
         'sec-fetch-mode': 'cors',
         'sec-fetch-site': 'same-origin',
         'user-agent': wallet.userAgent,
+        Referer: 'https://testnet.monad.xyz/',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
       },
       body: JSON.stringify({
         address: wallet.address,
         visitorId: visitorId,
-        cloudFlareResponseToken: captchaResult.data, // 注意这里使用 data 而非 code
+        cloudFlareResponseToken: captchaResult.data,
       }),
       agent: createProxyAgent(proxyString),
     });
+    console.log(visitorId, captchaResult.data);
+    const result = await response;
 
-    const result = await response.json();
-    console.log(`地址 ${wallet.address} 领取结果:`, result);
-    return result;
-  } catch (e) {
-    console.error(`地址 ${wallet.address} 领取失败:`, e);
-    return null;
+    const { status, statusText } = result;
+
+    if (status === 200) {
+      console.log(`地址 ${wallet.address} 领取结果:`, statusText);
+      return true;
+    } else {
+      console.log(result);
+      console.log(
+        `地址 ${wallet.address} 领取失败，状态: ${status} ${statusText}`
+      );
+      return false;
+    }
+  } catch (e: any) {
+    console.error(`地址 ${wallet.address} 领取失败:`, e.message);
+    return false;
   }
 }
 
 function generateWallet(index: number) {
   const wallet = ethers.Wallet.createRandom();
   const userAgent = USER_AGENTS[index % USER_AGENTS.length];
-  const screenResolution =
-    RESOLUTIONS[Math.floor(Math.random() * RESOLUTIONS.length)];
-  const timezone = TIMEZONES[Math.floor(Math.random() * TIMEZONES.length)];
-  const language = LANGUAGES[Math.floor(Math.random() * LANGUAGES.length)];
-  const webglOptions = [
-    { vendor: 'Intel Inc.', renderer: 'Intel Iris OpenGL Engine' },
-    {
-      vendor: 'NVIDIA Corporation',
-      renderer: 'NVIDIA GeForce GTX 970 OpenGL Engine',
-    },
-    { vendor: 'AMD', renderer: 'AMD Radeon Pro 560 OpenGL Engine' },
-  ];
-  const webgl = webglOptions[Math.floor(Math.random() * webglOptions.length)];
-  const canvasHash = crypto.randomBytes(16).toString('hex');
 
   return {
     address: wallet.address,
     privateKey: wallet.privateKey,
     userAgent,
-    screenResolution,
-    timezone,
-    language,
-    webglVendor: webgl.vendor,
-    webglRenderer: webgl.renderer,
-    canvasHash,
     lastClaim: 0,
+    claimed: false,
   };
 }
 
@@ -193,50 +193,59 @@ async function saveWallets(wallets: any[]) {
   await fs.writeFile('wallets.json', JSON.stringify(wallets, null, 2));
 }
 
-async function loadWallets() {
+async function loadAndFilterWallets() {
   try {
     const data = await fs.readFile('wallets.json', 'utf8');
-    return JSON.parse(data);
+    const wallets = JSON.parse(data);
+    const filteredWallets = wallets.filter((wallet: any) => wallet.claimed);
+    console.log('正在初始化钱包....');
+    await fs.writeFile(
+      'wallets.json',
+      JSON.stringify(filteredWallets, null, 2)
+    );
+    return filteredWallets;
   } catch (e) {
+    console.log('未找到 wallets.json 或文件为空，初始化新数据');
     return [];
   }
 }
 
 async function unlimitedClaim() {
-  let wallets = await loadWallets();
+  let wallets = await loadAndFilterWallets();
 
-  while (wallets.length < 3000) {
+  // 初始化 3000 个钱包
+  while (wallets.length < 100) {
     const wallet = generateWallet(wallets.length);
     wallets.push(wallet);
   }
+  await saveWallets(wallets);
 
   while (true) {
-    for (let i = 0; i < 3000; i++) {
+    for (let i = 0; i < 100; i++) {
       const wallet = wallets[i];
       const now = Date.now();
 
-      if (now - wallet.lastClaim >= INTERVAL) {
-        const result: any = await claimTokens(wallet, i);
+      if (now - wallet.lastClaim >= INTERVAL && !wallet.claimed) {
+        const result: any = await claimTokens(wallet);
 
-        if (result && result?.success) {
+        if (result) {
           wallet.lastClaim = now;
+          wallet.claimed = true; // 标记为已领取
           await saveWallets(wallets);
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 3000));
       }
     }
 
-    console.log('一轮完成，等待下一次检查...');
-    await new Promise((resolve) => setTimeout(resolve, 60000));
+    // 检查是否所有地址都已领取
+    const allClaimed = wallets.every((wallet: any) => wallet.claimed);
+    if (allClaimed) {
+      console.log('所有地址已完成领取，开始归集...');
+      // await collectFunds(wallets);
+      break; // 归集完成后退出循环
+    }
   }
 }
 
-fetch('https://api.ipify.org')
-  .then((res) => res.text())
-  .then((ip) => console.log('我的公网 IP:', ip))
-  .catch((err) => console.error('获取 IP 失败:', err));
-
-
 unlimitedClaim().catch(console.error);
-
