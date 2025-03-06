@@ -5,6 +5,7 @@ import { ethers } from 'ethers';
 import { promises as fs } from 'fs';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SocksProxyAgent } from 'socks-proxy-agent';
+import puppeteer from 'puppeteer';
 
 const APIKEY_2CAPTCHA = process.env.APIKEY_2CAPTCHA || '';
 const SKY_IP_TOKEN = process.env.SKY_IP_TOKEN || '';
@@ -73,7 +74,7 @@ async function getDynamicProxy() {
       }
       throw new Error(`无效的代理格式: ${proxyString}`);
     }
-    return `http://${proxyString}`;
+    // return `http://${proxyString}`;
     return 'socks5://liu3:Q3TokPp46w@158.178.244.174:39466';
   } catch (e: any) {
     console.error('获取 Sky-IP 动态代理失败:', e.message);
@@ -86,16 +87,6 @@ function generateVisitorId(wallet: any): string {
     RESOLUTIONS[Math.floor(Math.random() * RESOLUTIONS.length)];
   const timezone = TIMEZONES[Math.floor(Math.random() * TIMEZONES.length)];
   const language = LANGUAGES[Math.floor(Math.random() * LANGUAGES.length)];
-  // const webglOptions = [
-  //   { vendor: 'Intel Inc.', renderer: 'Intel Iris OpenGL Engine' },
-  //   {
-  //     vendor: 'NVIDIA Corporation',
-  //     renderer: 'NVIDIA GeForce GTX 970 OpenGL Engine',
-  //   },
-  //   { vendor: 'AMD', renderer: 'AMD Radeon Pro 560 OpenGL Engine' },
-  // ];
-  // const webgl = webglOptions[Math.floor(Math.random() * webglOptions.length)];
-  // const canvasHash = crypto.randomBytes(16).toString('hex');
 
   const fingerprintData = {
     userAgent: wallet.userAgent,
@@ -105,12 +96,57 @@ function generateVisitorId(wallet: any): string {
     timezone: timezone,
     plugins: 'PDF Viewer,Chrome PDF Viewer,MetaMask',
     platform: 'Windows',
+    randomSalt: crypto.randomBytes(8).toString('hex'),
   };
 
   return crypto
     .createHash('md5')
     .update(JSON.stringify(fingerprintData))
     .digest('hex');
+}
+
+async function getVercelChallenge(wallet: any, proxyString: string) {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      `--proxy-server=${proxyString}`,
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+    ],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(wallet.userAgent);
+    await page.goto('https://testnet.monad.xyz/', {
+      waitUntil: 'networkidle2',
+    });
+
+    // 拦截请求，提取挑战参数
+    let challengeData: { token?: string; solution?: string; version?: string } =
+      {};
+    page.on('request', (request) => {
+      if (request.url().includes('request-challenge')) {
+        challengeData = {
+          token: request.headers()['x-vercel-challenge-token'],
+          solution: request.headers()['x-vercel-challenge-solution'],
+          version: request.headers()['x-vercel-challenge-version'],
+        };
+      }
+    });
+
+    // 等待挑战请求触发
+    await page.waitForRequest(
+      (req) => req.url().includes('request-challenge'),
+      { timeout: 30000 }
+    );
+
+    await browser.close();
+    if (!challengeData?.token) throw new Error('未捕获挑战参数');
+    return challengeData;
+  } catch (e: any) {
+    await browser.close();
+    throw e;
+  }
 }
 
 async function claimTokens(wallet: any) {
@@ -120,6 +156,7 @@ async function claimTokens(wallet: any) {
 
     const captchaResult = await solver.turnstile(SITE_KEY, URL);
     const visitorId = generateVisitorId(wallet);
+    // await getVercelChallenge(wallet, proxyString);
 
     await fetch('https://api.ipify.org', {
       agent: createProxyAgent(proxyString),
@@ -132,21 +169,11 @@ async function claimTokens(wallet: any) {
       method: 'POST',
       headers: {
         accept: '*/*',
-        'accept-language': 'zh-CN,zh;q=0.9',
-        'cache-control': 'no-cache',
         'content-type': 'application/json',
-        pragma: 'no-cache',
-        priority: 'u=1, i',
-        'sec-ch-ua':
-          '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': 'Windows',
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'same-origin',
         'user-agent': wallet.userAgent,
-        Referer: 'https://testnet.monad.xyz/',
-        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        referer: 'https://testnet.monad.xyz/',
+        Cookie:
+          '_vcrcs=1.1741254125.3600.MGQ5OGMwNjM0OGViZDQxNDE0M2JiYjY5Yjk0ZWEzYjI=.17a1e75d2090c258f1f968d435200fb0; wagmi.store={"state":{"connections":{"__type":"Map","value":[["cdc8504d7c1",{"accounts":["0xf40bA227C549CeE12218c53Cfcd108ec8fa353F5"],"chainId":1,"connector":{"id":"com.okex.wallet","name":"OKX Wallet","type":"injected","uid":"cdc8504d7c1"}}]]},"chainId":10143,"current":"cdc8504d7c1"},"version":2}',
       },
       body: JSON.stringify({
         address: wallet.address,
@@ -155,9 +182,8 @@ async function claimTokens(wallet: any) {
       }),
       agent: createProxyAgent(proxyString),
     });
-    console.log(visitorId, captchaResult.data);
-    const result = await response;
 
+    const result = await response;
     const { status, statusText } = result;
 
     if (status === 200) {
@@ -214,14 +240,14 @@ async function unlimitedClaim() {
   let wallets = await loadAndFilterWallets();
 
   // 初始化 3000 个钱包
-  while (wallets.length < 100) {
+  while (wallets.length < 5) {
     const wallet = generateWallet(wallets.length);
     wallets.push(wallet);
   }
   await saveWallets(wallets);
 
   while (true) {
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 5; i++) {
       const wallet = wallets[i];
       const now = Date.now();
 
