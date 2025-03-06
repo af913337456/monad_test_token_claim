@@ -11,7 +11,7 @@ const APIKEY_2CAPTCHA = process.env.APIKEY_2CAPTCHA || '';
 const SKY_IP_TOKEN = process.env.SKY_IP_TOKEN || '';
 const SITE_KEY = '0x4AAAAAAA-3X4Nd7hf3mNGx';
 const URL = 'https://testnet.monad.xyz/';
-const INTERVAL = 12 * 60 * 60 * 1000; // 12小时
+const INTERVAL = 12 * 60 * 60 * 1000; // 12 小时
 const TARGET_ADDRESS = '0xYourTargetAddressHere'; // 替换为你的目标归集地址
 const RPC_URL = 'https://testnet.monad.xyz/rpc'; // Monad Testnet RPC URL（根据实际情况替换）
 
@@ -70,14 +70,14 @@ async function getDynamicProxy() {
 
     if (!proxyString.match(/^\d+\.\d+\.\d+\.\d+:\d+$/)) {
       if (proxyString.includes('未加入白名单')) {
-        throw new Error(`本地 IP 未加入 SKY-IP 白名单: ${proxyString}`);
+        throw new Error(`本地 IP 未加入 SKY-IP 白名单：${proxyString}`);
       }
-      throw new Error(`无效的代理格式: ${proxyString}`);
+      throw new Error(`无效的代理格式：${proxyString}`);
     }
     // return `http://${proxyString}`;
     return 'socks5://liu3:Q3TokPp46w@158.178.244.174:39466';
   } catch (e: any) {
-    console.error('获取 Sky-IP 动态代理失败:', e.message);
+    console.error('获取 Sky-IP 动态代理失败：', e.message);
     return null;
   }
 }
@@ -162,8 +162,8 @@ async function claimTokens(wallet: any) {
       agent: createProxyAgent(proxyString),
     })
       .then((res) => res.text())
-      .then((ip) => console.log('代理IP:', ip))
-      .catch((err) => console.error('获取代理IP失败:', err.message));
+      .then((ip) => console.log('代理 IP:', ip))
+      .catch((err) => console.error('获取代理 IP 失败：', err.message));
 
     const response = await fetch('https://testnet.monad.xyz/api/claim', {
       method: 'POST',
@@ -192,7 +192,7 @@ async function claimTokens(wallet: any) {
     } else {
       console.log(result);
       console.log(
-        `地址 ${wallet.address} 领取失败，状态: ${status} ${statusText}`
+        `地址 ${wallet.address} 领取失败，状态：${status} ${statusText}`
       );
       return false;
     }
